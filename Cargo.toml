@@ -1,0 +1,13 @@
+[package]
+name = "ado_task_codegen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+reqwest = { version = "0.12", features = ["blocking"] }
+scraper = "0.19" # To find the code block
+clap = { version = "4.5", features = ["derive"] }
+heck = "0.5" # Case conversion
+regex = "1"
+lazy_static = "1.4"
+chrono = "0.4"
