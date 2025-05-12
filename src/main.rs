@@ -4,20 +4,28 @@ use scraper::{Html, Selector};
 use heck::ToPascalCase;
 use regex::Regex;
 use lazy_static::lazy_static;
-//use std::collections::HashMap; // Keep for potential future use? Or remove if truly unused.
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// URL of the Azure DevOps task documentation page
+    /// ( e.g. https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/npm-v1?view=azure-pipelines )
     #[arg(short, long)]
     url: String,
 
-    /// Base class name for the generated C# class
+    /// Include the raw original documentation for each option.
+    #[arg(short, long)]
+    include_original_documentation: bool,
+
+    /// Include diagnostic output
+    #[arg(short, long)]
+    diagnostic_output: bool,
+
+    /// Optional base class name for the generated C# class
     #[arg(short, long, default_value = "AzureDevOpsTask")]
     base_class: String,
 
-    /// Name for the generated C# class (derived from TaskName if not provided)
+    /// Optional name for the generated C# class (derived from TaskName if not provided)
     #[arg(short, long)]
     class_name: Option<String>,
 }
@@ -55,13 +63,6 @@ lazy_static! {
     // Rule 4: Input parameter line
     static ref INPUT_LINE_RE: Regex = Regex::new(
         r"^ {3,}(?:#\s*)?(?<InputName>\w+):\s*.*?#\s*(?<Documentation>.*)$"
-        //  ^^^^^ Indentation (3+ spaces)
-        //       ^^^^^^^^ Optional comment marker # for optional inputs
-        //             ^^^^^^^^^^^^ Input Name capture
-        //                   ^^ Colon
-        //                     ^^^^^^^ Non-greedy skip of example value/whitespace
-        //                            ^^^ The # starting the documentation
-        //                               ^^^^^^^^^^^^^^^^^^ Capture the documentation string
     ).expect("Invalid Input Line Regex");
 
     // For parsing the captured Documentation string (same as METADATA_RE before)
@@ -75,15 +76,15 @@ lazy_static! {
     // Group 5: Default value (if preceded by description)
 }
 
+lazy_static! {
+    static ref ARGS : Args = Args::parse();
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
     let start_time = std::time::Instant::now(); // Start timing
+    let html_content = fetch_html(&ARGS.url)?;
 
-    println!("// Fetching documentation from: {}", args.url);
-    let html_content = fetch_html(&args.url)?;
-
-    println!("// Extracting YAML snippet text...");
+    print_diagnostic("// Extracting YAML snippet text...");
     let yaml_text = extract_yaml_snippet(&html_content)?;
 
     if yaml_text.is_empty() {
@@ -91,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          return Ok(());
     }
 
-    println!("// Parsing YAML snippet line by line...");
+    print_diagnostic("// Parsing YAML snippet line by line...");
     let parsed_info = parse_yaml_lines(&yaml_text)?;
 
     if parsed_info.parameters.is_empty() {
@@ -99,9 +100,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Decide if we should proceed or stop
     }
 
-    println!("// Generating C# code...");
+    print_diagnostic("// Generating C# code...");
      // Use parsed TaskName for class name if not provided via CLI arg
-     let class_name = args.class_name.unwrap_or_else(|| {
+     let class_name = ARGS.class_name.clone().unwrap_or_else(|| {
          parsed_info.task_name.to_pascal_case() + "Task"
      });
 
@@ -112,22 +113,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &parsed_info.task_version,
         &parsed_info.parameters,
         &class_name,
-        &args.base_class
+        &ARGS.base_class
     )?;
 
-    println!("\n// --- Generated C# Code ---");
+    print_diagnostic("\n// --- Generated C# Code ---");
     println!("{}", csharp_code);
-
-    let duration = start_time.elapsed();
-    println!("// Generation finished in {:?}", duration);
+    print_diagnostic(&format!("// Generation finished in {:?}", start_time.elapsed()));
 
     Ok(())
+}
+
+fn print_diagnostic(output: &str)
+{
+    if ARGS.diagnostic_output
+    {
+        println!("{}", output);
+    }
 }
 
 // --- HTTP Fetching (same as before) ---
 fn fetch_html(url: &str) -> Result<String, reqwest::Error> {
     let client = reqwest::blocking::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0")
         .build()?;
     client.get(url).send()?.text()
 }
@@ -135,7 +142,8 @@ fn fetch_html(url: &str) -> Result<String, reqwest::Error> {
 // --- HTML Snippet Extraction (same as before) ---
 fn extract_yaml_snippet(html: &str) -> Result<String, Box<dyn std::error::Error>> {
      let document = Html::parse_document(html);
-    // Selector might need adjustment based on actual page structure for lang-yaml blocks
+    // Selector used to locate the code block in the page containing the model structure.
+    // This might need adjustment based on actual page, should things change.
     let selector = Selector::parse("div.content code.lang-yaml, div.content pre code").map_err(|e| e.to_string())?; // Added fallback selector
 
     if let Some(code_element) = document.select(&selector).next() {
@@ -316,7 +324,7 @@ fn format_default_value(value: &str, base_type: &str, is_enum: bool) -> String {
 }
 
 
-// --- C# Code Generation (Updated Signature) ---
+// --- C# Code Generation ---
 fn generate_csharp(
     task_summary: &str,
     task_name: &str,
@@ -351,8 +359,12 @@ fn generate_csharp(
             .collect::<Vec<_>>()
             .join("\n");
          // Add the original documentation string as well for reference
-         //let doc_comment_line = format!("    /// Raw Doc: {}", documentation_escaped(&p.description)); // Need helper to escape XML chars
-         //description_lines.push_str(&format!("\n{}", doc_comment_line));
+         
+         if ARGS.include_original_documentation
+         {
+            let doc_comment_line = format!("    /// Raw Doc: {}", documentation_escaped(&p.description)); // Need helper to escape XML chars
+            description_lines.push_str(&format!("\n{}", doc_comment_line));
+         }
 
 
         properties_code.push_str(&format!("    /// <summary>\n{}\n    /// </summary>\n", description_lines));
@@ -399,23 +411,24 @@ fn generate_csharp(
     }
 
     // --- Assemble Final Class ---
-     let class_summary = format!(
+    let class_summary = format!(
         "Generated C# model for the Azure DevOps task: {task_name} v{task_version}.\n/// {task_summary}",
         task_name = task_name,
         task_version = task_version,
         task_summary = task_summary // Already trimmed
     );
-     let escaped_class_summary = class_summary.lines()
+    let escaped_class_summary = class_summary.lines()
          .map(|l| format!("/// {}", l))
          .collect::<Vec<_>>()
          .join("\n");
 
     let final_code = format!(
-r#"using Sharpliner.AzureDevOps.Tasks;
-using YamlDotNet.Serialization;
-
-// Auto-Generated by Rust tool on {generation_date}
+r#"// Auto-Generated using '{tool_name}' version {tool_version} on {generation_date}
 // Source Task: {task_name} v{task_version}
+// Source Documentation: {documentation_url}
+
+using Sharpliner.AzureDevOps.Tasks;
+using YamlDotNet.Serialization;
 
 // --- Enums ---
 
@@ -429,15 +442,17 @@ public record class {class_name} : {base_class} {{
     }}
 {properties_code}}}
 "#,
+        tool_name = env!("CARGO_PKG_NAME"),
+        tool_version = env!("CARGO_PKG_VERSION"),
         generation_date = chrono::Local::now().to_rfc2822(), // Using chrono crate if added
-        // generation_date = "Current Date/Time", // Simpler alternative if chrono not added
         task_name = task_name,
         task_version = task_version,
         base_class = base_class,
         enums_code = enums_code.trim(),
         escaped_class_summary = escaped_class_summary,
         class_name = class_name,
-        properties_code = properties_code.trim_end()
+        properties_code = properties_code.trim_end(),
+        documentation_url = &ARGS.url
     );
 
     Ok(final_code)
@@ -450,7 +465,3 @@ fn documentation_escaped(doc: &str) -> String {
         .replace('>', "&gt;")
         // Add other replacements if needed
 }
-
-
-// Add chrono to Cargo.toml if using the date feature:
-// chrono = { version = "0.4", features = ["serde"] } // Or just "0.4"

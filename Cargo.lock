@@ -18,19 +18,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
-name = "ado_task_codegen"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "heck",
- "lazy_static",
- "regex",
- "reqwest",
- "scraper",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1538,6 +1525,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d036d71a959e00c77a63538b90a6c2390969f9772b096ea837205c6bd0491a44"
 dependencies = [
  "stable_deref_trait",
+]
+
+[[package]]
+name = "sharpliner_task_codegen"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "heck",
+ "lazy_static",
+ "regex",
+ "reqwest",
+ "scraper",
 ]
 
 [[package]]
