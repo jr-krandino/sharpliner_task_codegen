@@ -440,7 +440,8 @@ public record class {class_name} : {base_class} {{
     public {class_name}() : base("{task_name}@{task_version}")
     {{
     }}
-{properties_code}}}
+{properties_code}
+}}
 "#,
         tool_name = env!("CARGO_PKG_NAME"),
         tool_version = env!("CARGO_PKG_VERSION"),
